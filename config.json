@@ -1,0 +1,14 @@
+{
+  "bots": {
+    "picklejar": {
+      "prefix": "!",
+      "description": "PickleJar Bot",
+      "token_env": "DISCORD_PICKLE_BOT_TOKEN"
+    },
+    "mediafinder": {
+      "prefix": "?",
+      "description": "Media Finder Bot",
+      "token_env": "DISCORD_MEDIA_BOT_TOKEN"
+    }
+  }
+}
