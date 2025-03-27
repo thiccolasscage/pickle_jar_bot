@@ -1,0 +1,91 @@
+# ✅ How to Connect Your PostgreSQL Schema to Bots on Railway
+
+This assumes you've already deployed your PostgreSQL schema (e.g., using postgresql_schema_optimized.sql) into Railway or pgAdmin.
+
+---
+
+## 1. ✅ Set the DATABASE_URL in `.env`
+
+Go to Railway → Your Project → PostgreSQL Plugin → **Connection** tab.
+
+Copy the full `DATABASE_URL`, it looks like:
+
+```
+postgresql://username:password@hostname:port/dbname
+```
+
+In your project directory, open or create `.env`:
+
+```
+DATABASE_URL=postgresql://username:password@hostname:port/dbname
+DISCORD_PICKLE_BOT_TOKEN=your_picklejar_token
+DISCORD_MEDIA_BOT_TOKEN=your_mediafinder_token
+```
+
+---
+
+## 2. ✅ Use `os.getenv("DATABASE_URL")` in Your Code
+
+In `utils/db_manager.py`, this is already handled:
+
+```python
+import os
+import asyncpg
+
+class DatabaseManager:
+    def __init__(self):
+        self.db_url = os.getenv("DATABASE_URL")
+        self.pool = None
+
+    async def connect(self):
+        if not self.db_url:
+            raise ValueError("DATABASE_URL environment variable is not set. Please set it in your .env file.")
+        self.pool = await asyncpg.create_pool(self.db_url)
+```
+
+Your bot's `.connect()` method will auto-connect to the correct PostgreSQL schema on Railway.
+
+---
+
+## 3. ✅ Make Sure `.env` Loads at Runtime
+
+In your `main.py` or `db_manager.py`, load the `.env` file early:
+
+```python
+from dotenv import load_dotenv
+load_dotenv()
+```
+
+This will make `DATABASE_URL` and your bot tokens available to `os.getenv()`.
+
+---
+
+## 4. ✅ Deploy with `.env` on Railway
+
+In Railway:
+
+- Go to **Variables** tab of your project.
+- Add your `.env` keys and values (no quotes):
+
+```
+DATABASE_URL=postgresql://...
+DISCORD_PICKLE_BOT_TOKEN=...
+DISCORD_MEDIA_BOT_TOKEN=...
+```
+
+Railway will inject these at runtime like `.env`.
+
+---
+
+## 5. ✅ Your Bot's Usage
+
+Now, any cog or module can use:
+
+```python
+from utils.db_manager import db
+
+await db.execute("INSERT INTO pickle_counts (...) VALUES (...)")
+await db.fetch("SELECT * FROM media_collections")
+```
+
+Your bot is now fully connected to PostgreSQL via Railway 🎉

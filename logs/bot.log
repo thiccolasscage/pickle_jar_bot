@@ -1,0 +1,84 @@
+2025-03-19 23:15:36,080 - INFO - Loaded environment variables from .env file
+2025-03-19 23:15:36,082 - ERROR - DATABASE_URL environment variable is not set. Running in limited mode without database features.
+2025-03-19 23:15:36,082 - ERROR - Warning: Running without database connection. Some features will be unavailable.
+2025-03-19 23:15:36,083 - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-19 23:15:36,085 - INFO - Created empty cog file: cogs/error_handler.py
+2025-03-19 23:15:36,090 - INFO - Loaded extension: cogs.error_handler
+2025-03-19 23:15:36,116 - INFO - Loaded extension: cogs.moderation
+2025-03-19 23:15:36,126 - INFO - Loaded extension: cogs.community_recognition
+2025-03-19 23:15:36,127 - INFO - Created empty cog file: cogs/admin_tools.py
+2025-03-19 23:15:36,131 - INFO - Loaded extension: cogs.admin_tools
+2025-03-19 23:15:36,143 - INFO - Loaded extension: cogs.pickle_tracking
+2025-03-19 23:15:36,144 - INFO - Created empty cog file: cogs/custom_commands.py
+2025-03-19 23:15:36,148 - INFO - Loaded extension: cogs.custom_commands
+2025-03-19 23:15:36,148 - INFO - Successfully loaded all cogs!
+2025-03-19 23:15:36,148 - INFO - logging in using static token
+2025-03-19 23:15:36,159 - INFO - Loaded extension: cogs.error_handler
+2025-03-19 23:15:36,163 - INFO - Loaded extension: cogs.moderation
+2025-03-19 23:15:36,166 - INFO - Loaded extension: cogs.community_recognition
+2025-03-19 23:15:36,167 - INFO - Loaded extension: cogs.admin_tools
+2025-03-19 23:15:36,177 - ERROR - Failed to load extension cogs.media_management: Extension 'cogs.media_management' raised an error: AttributeError: loop attribute cannot be accessed in non-async contexts. Consider using either an asynchronous main function and passing it to asyncio.run or using asynchronous initialisation hooks such as Client.setup_hook
+2025-03-19 23:15:36,177 - ERROR - Failed to load 1 cogs: cogs.media_management
+2025-03-19 23:15:36,177 - INFO - logging in using static token
+2025-03-19 23:15:36,296 - ERROR - Invalid token for mediafinder
+2025-03-19 23:15:36,409 - ERROR - Invalid token for picklejar
+2025-03-19 23:15:36,431 - ERROR - Unclosed connector
+connections: ['deque([(<aiohttp.client_proto.ResponseHandler object at 0x0000020FD1658AD0>, 675046.4474854)])']
+connector: <aiohttp.connector.TCPConnector object at 0x0000020FD1648050>
+2025-03-19 23:15:36,432 - ERROR - Unclosed connector
+connections: ['deque([(<aiohttp.client_proto.ResponseHandler object at 0x0000020FD16589B0>, 675046.5599342)])']
+connector: <aiohttp.connector.TCPConnector object at 0x0000020FD1620830>
+2025-03-21 14:31:57,846 - INFO - Loaded environment variables from .env file
+2025-03-21 14:31:57,848 - ERROR - DATABASE_URL environment variable is not set. Running in limited mode without database features.
+2025-03-21 14:31:57,849 - ERROR - Warning: Running without database connection. Some features will be unavailable.
+2025-03-21 14:31:57,850 - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-21 14:31:57,856 - INFO - Loaded extension: cogs.error_handler
+2025-03-21 14:31:57,868 - INFO - Loaded extension: cogs.moderation
+2025-03-21 14:31:57,873 - INFO - Loaded extension: cogs.community_recognition
+2025-03-21 14:31:57,875 - INFO - Loaded extension: cogs.admin_tools
+2025-03-21 14:31:57,880 - INFO - Loaded extension: cogs.pickle_tracking
+2025-03-21 14:31:57,883 - INFO - Loaded extension: cogs.custom_commands
+2025-03-21 14:31:57,883 - INFO - Successfully loaded all cogs!
+2025-03-21 14:31:57,883 - INFO - logging in using static token
+2025-03-21 14:31:57,893 - INFO - Loaded extension: cogs.error_handler
+2025-03-21 14:31:57,897 - INFO - Loaded extension: cogs.moderation
+2025-03-21 14:31:57,900 - INFO - Loaded extension: cogs.community_recognition
+2025-03-21 14:31:57,901 - INFO - Loaded extension: cogs.admin_tools
+2025-03-21 14:31:57,906 - ERROR - Failed to load extension cogs.media_management: Extension 'cogs.media_management' raised an error: AttributeError: loop attribute cannot be accessed in non-async contexts. Consider using either an asynchronous main function and passing it to asyncio.run or using asynchronous initialisation hooks such as Client.setup_hook
+2025-03-21 14:31:57,907 - ERROR - Failed to load 1 cogs: cogs.media_management
+2025-03-21 14:31:57,907 - ERROR - Missing environment variable: DISCORD_MEDIA_BOT_TOKEN
+2025-03-21 14:31:57,907 - ERROR - Cannot start mediafinder: Missing token
+2025-03-21 14:31:59,136 - INFO - Shard ID None has connected to Gateway (Session ID: baf05e087a62f78a34befd48e191f763).
+2025-03-21 14:32:01,157 - ERROR - Database not connected. Cannot execute query.
+2025-03-21 14:32:01,773 - INFO - Synced 19 command(s)
+2025-03-21 14:32:01,773 - INFO - pickle_jar_bot#9958 is online! Serving 2 servers.
+2025-03-21 14:37:01,160 - ERROR - Database not connected. Cannot execute query.
+2025-03-21 14:42:01,155 - ERROR - Database not connected. Cannot execute query.
+2025-03-21 14:44:58,215 - ERROR - Database not connected. Cannot execute query.
+2025-03-21 14:44:58,215 - INFO - thiccolascage0554 mentioned a pickle word and received a pickle.
+2025-03-21 14:44:58,481 - ERROR - Database not connected. Cannot execute query.
+2025-03-21 14:47:01,157 - ERROR - Database not connected. Cannot execute query.
+2025-03-21 14:52:01,166 - ERROR - Database not connected. Cannot execute query.
+2025-03-21 14:57:01,157 - ERROR - Database not connected. Cannot execute query.
+2025-03-21 15:02:01,168 - ERROR - Database not connected. Cannot execute query.
+2025-03-21 15:31:31,373 - INFO - Loaded environment variables from .env file
+2025-03-21 15:31:31,375 - ERROR - DATABASE_URL environment variable is not set. Running in limited mode without database features.
+2025-03-21 15:31:31,375 - ERROR - Warning: Running without database connection. Some features will be unavailable.
+2025-03-21 15:31:31,376 - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-21 15:31:31,380 - INFO - Loaded extension: cogs.error_handler
+2025-03-21 15:31:31,386 - INFO - Loaded extension: cogs.moderation
+2025-03-21 15:31:31,390 - INFO - Loaded extension: cogs.community_recognition
+2025-03-21 15:31:31,391 - INFO - Loaded extension: cogs.admin_tools
+2025-03-21 15:31:31,395 - INFO - Loaded extension: cogs.pickle_tracking
+2025-03-21 15:31:31,396 - INFO - Loaded extension: cogs.custom_commands
+2025-03-21 15:31:31,396 - INFO - Successfully loaded all cogs!
+2025-03-21 15:31:31,396 - ERROR - Missing environment variable: MTM1MDMxMjcwOTEzNjMxODU0NA.GgKbd3.fAcisJBK0SOF59w0GZFDaLy85IaxE00CblG_p4
+2025-03-21 15:31:31,396 - ERROR - Cannot start picklejar: Missing token
+2025-03-21 15:31:31,399 - INFO - Loaded extension: cogs.error_handler
+2025-03-21 15:31:31,403 - INFO - Loaded extension: cogs.moderation
+2025-03-21 15:31:31,406 - INFO - Loaded extension: cogs.community_recognition
+2025-03-21 15:31:31,407 - INFO - Loaded extension: cogs.admin_tools
+2025-03-21 15:31:31,410 - ERROR - Failed to load extension cogs.media_management: Extension 'cogs.media_management' raised an error: AttributeError: loop attribute cannot be accessed in non-async contexts. Consider using either an asynchronous main function and passing it to asyncio.run or using asynchronous initialisation hooks such as Client.setup_hook
+2025-03-21 15:31:31,410 - ERROR - Failed to load 1 cogs: cogs.media_management
+2025-03-21 15:31:31,410 - ERROR - Missing environment variable: MTM1MjcxOTI0ODE1MzExNjc5Mw.G6-D3p.aTLOi3eSuT2P2WuE1KHJQ4U3nouL_vIU4UjxrA
+2025-03-21 15:31:31,410 - ERROR - Cannot start mediafinder: Missing token
