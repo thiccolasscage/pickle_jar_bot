@@ -1,0 +1,21 @@
+{
+  "pickle_rewards": {
+    "words": ["pickle", "dill", "gherkin", "gherkins", "pickled"],
+    "cooldown_seconds": 300,
+    "reward_messages": [
+      "🥒 {user} just got a pickle!",
+      "Congrats {user}! You earned a pickle!",
+      "One fresh pickle for {user}! 🥒",
+      "Pickle acquired! {user} adds one to their collection!"
+    ]
+  },
+  "moderation": {
+    "default_warning_reason": "Breaking server rules",
+    "auto_punish": false,
+    "warning_thresholds": {
+      "3": "mute",
+      "5": "kick",
+      "7": "ban"
+    }
+  }
+}
