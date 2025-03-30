@@ -1,718 +1,331 @@
 import discord
-from discord import app_commands
-from discord.ext import commands, tasks
-import datetime
-import asyncio
-from typing import Optional, Literal
+from discord.ext import commands
 from utils.db_manager import db
 from utils.logger import logger
 from utils.config import config
+import datetime
 
 class Moderation(commands.Cog):
+    """Commands for server moderation"""
+
     def __init__(self, bot):
         self.bot = bot
-        self.check_expired_punishments.start()
-        
-    def cog_unload(self):
-        self.check_expired_punishments.cancel()
-    
-    async def get_guild_settings(self, guild_id):
-        """Retrieve guild settings from database"""
-        settings = await db.fetchrow(
-            "SELECT * FROM guild_settings WHERE guild_id = $1",
-            str(guild_id)
+        self.default_warning_reason = config.get("moderation", {}).get(
+            "default_warning_reason", "Breaking server rules"
         )
-        return settings or {}
-    
-    async def has_mod_permissions(self, ctx):
-        """Check if user has moderation permissions"""
-        if ctx.author.guild_permissions.administrator:
-            return True
-            
-        settings = await self.get_guild_settings(ctx.guild.id)
-        mod_role_id = settings.get('mod_role_id')
-        
-        if mod_role_id:
-            mod_role = ctx.guild.get_role(int(mod_role_id))
-            if mod_role and mod_role in ctx.author.roles:
-                return True
-                
-        return False
-    
-    @tasks.loop(minutes=5)
-    async def check_expired_punishments(self):
-        """Check and remove expired punishments"""
-        now = datetime.datetime.now(datetime.timezone.utc)
-        
-        # Fetch expired punishments
-        expired = await db.fetch(
-            """
-            SELECT * FROM timed_punishments 
-            WHERE expires_at < $1 AND active = TRUE
-            """,
-            now
-        )
-        
-        for record in expired:
-            guild_id = int(record['guild_id'])
-            user_id = int(record['user_id'])
-            punishment_type = record['punishment_type']
-            
-            guild = self.bot.get_guild(guild_id)
-            if not guild:
-                continue
-                
-            if punishment_type == 'mute':
-                # Handle expired mute
-                settings = await self.get_guild_settings(guild_id)
-                mute_role_id = settings.get('mute_role_id')
-                
-                if mute_role_id:
-                    mute_role = guild.get_role(int(mute_role_id))
-                    member = guild.get_member(user_id)
-                    
-                    if member and mute_role and mute_role in member.roles:
-                        try:
-                            await member.remove_roles(mute_role, reason="Mute duration expired")
-                            logger.log(f"Removed expired mute for {member} in {guild}")
-                        except discord.HTTPException as e:
-                            logger.log(f"Failed to remove mute role: {e}", "error")
-            
-            elif punishment_type == 'ban':
-                # Handle expired ban
-                try:
-                    await guild.unban(discord.Object(user_id), reason="Ban duration expired")
-                    logger.log(f"Removed expired ban for user {user_id} in {guild}")
-                except discord.HTTPException as e:
-                    logger.log(f"Failed to unban user {user_id}: {e}", "error")
-            
-            # Mark punishment as inactive
-            await db.execute(
-                """
-                UPDATE timed_punishments
-                SET active = FALSE
-                WHERE id = $1
-                """,
-                record['id']
-            )
-    
-    @check_expired_punishments.before_loop
-    async def before_check_punishments(self):
-        await self.bot.wait_until_ready()
-    
-    @commands.hybrid_command(name="warn")
-    @commands.guild_only()
-    @app_commands.describe(
-        member="The member to warn",
-        reason="The reason for the warning"
-    )
-    async def warn_user(self, ctx, member: discord.Member, *, reason: str = None):
-        """Warn a user for breaking rules"""
-        if not await self.has_mod_permissions(ctx):
-            await ctx.send("You don't have permission to use this command.")
-            return
-            
-        if reason is None:
-            reason = config.get("moderation", {}).get("default_warning_reason", "No reason provided")
-        
-        # Store warning in database
-        await db.execute(
-            """
-            INSERT INTO warnings (guild_id, user_id, moderator_id, reason)
-            VALUES ($1, $2, $3, $4)
-            """,
-            str(ctx.guild.id), str(member.id), str(ctx.author.id), reason
-        )
-        
-        # Get warning count
-        warnings = await db.fetch(
-            """
-            SELECT COUNT(*) as count FROM warnings
-            WHERE guild_id = $1 AND user_id = $2 AND active = TRUE
-            """,
-            str(ctx.guild.id), str(member.id)
-        )
-        warning_count = warnings[0]['count'] if warnings else 0
-        
-        # Create embed for warning
-        embed = discord.Embed(
-            title="⚠️ Warning",
-            description=f"{member.mention} has been warned by {ctx.author.mention}",
-            color=discord.Color.yellow()
-        )
-        embed.add_field(name="Reason", value=reason, inline=False)
-        embed.add_field(name="Warning Count", value=str(warning_count), inline=False)
-        embed.set_footer(text=f"ID: {member.id}")
-        
-        await ctx.send(embed=embed)
-        
-        # Send DM to warned user
-        try:
-            user_embed = discord.Embed(
-                title=f"You've been warned in {ctx.guild.name}",
-                description=f"**Reason:** {reason}",
-                color=discord.Color.yellow()
-            )
-            user_embed.add_field(name="Warning Count", value=str(warning_count), inline=False)
-            user_embed.set_footer(text=f"If you believe this was in error, please contact a server moderator.")
-            
-            await member.send(embed=user_embed)
-        except discord.HTTPException:
-            await ctx.send(f"Note: Could not send DM to {member.mention}")
-        
-        # Check for auto-punishments
-        if config.get("moderation", {}).get("auto_punish", False):
-            thresholds = config.get("moderation", {}).get("warning_thresholds", {})
-            
-            for threshold_str, action in thresholds.items():
-                threshold = int(threshold_str)
-                if warning_count == threshold:
-                    if action == "mute":
-                        await self.tempmute.invoke(ctx)
-                    elif action == "kick":
-                        await self.kick_user.invoke(ctx)
-                    elif action == "ban":
-                        await self.tempban.invoke(ctx)
-                    break
-    
-    @commands.hybrid_command(name="warnings")
-    @commands.guild_only()
-    @app_commands.describe(
-        member="The member to check warnings for"
-    )
-    async def list_warnings(self, ctx, member: discord.Member):
-        """List all warnings for a user"""
-        # Anyone can view warnings
-        warnings = await db.fetch(
-            """
-            SELECT id, moderator_id, reason, timestamp, active
-            FROM warnings
-            WHERE guild_id = $1 AND user_id = $2
-            ORDER BY timestamp DESC
-            """,
-            str(ctx.guild.id), str(member.id)
-        )
-        
-        if not warnings:
-            await ctx.send(f"{member.display_name} has no warnings.")
-            return
-            
-        active_warnings = [w for w in warnings if w['active']]
-        
-        embed = discord.Embed(
-            title=f"Warnings for {member.display_name}",
-            description=f"Active warnings: {len(active_warnings)}\nTotal warnings: {len(warnings)}",
-            color=discord.Color.orange()
-        )
-        
-        for i, warning in enumerate(warnings[:10], 1):
-            moderator = ctx.guild.get_member(int(warning['moderator_id']))
-            mod_name = moderator.display_name if moderator else "Unknown Moderator"
-            
-            status = "Active" if warning['active'] else "Cleared"
-            time = warning['timestamp'].strftime("%Y-%m-%d %H:%M:%S")
-            
-            embed.add_field(
-                name=f"Warning #{i} ({status})",
-                value=f"**Reason:** {warning['reason']}\n" \
-                      f"**Moderator:** {mod_name}\n" \
-                      f"**Date:** {time}\n" \
-                      f"**ID:** {warning['id']}",
-                inline=False
-            )
-        
-        if len(warnings) > 10:
-            embed.set_footer(text=f"Showing 10 of {len(warnings)} warnings")
-            
-        await ctx.send(embed=embed)
-    
-    @commands.hybrid_command(name="clearwarn")
-    @commands.guild_only()
-    @app_commands.describe(
-        warning_id="ID of the warning to clear"
-    )
-    async def clear_warning(self, ctx, warning_id: int):
-        """Clear a specific warning by its ID"""
-        if not await self.has_mod_permissions(ctx):
-            await ctx.send("You don't have permission to use this command.")
-            return
-            
-        # Verify the warning exists and belongs to this guild
-        warning = await db.fetchrow(
-            """
-            SELECT user_id, active
-            FROM warnings
-            WHERE id = $1 AND guild_id = $2
-            """,
-            warning_id, str(ctx.guild.id)
-        )
-        
-        if not warning:
-            await ctx.send("Warning not found or not from this server.")
-            return
-            
-        if not warning['active']:
-            await ctx.send("This warning is already cleared.")
-            return
-            
-        # Clear the warning
-        await db.execute(
-            """
-            UPDATE warnings
-            SET active = FALSE
-            WHERE id = $1
-            """,
-            warning_id
-        )
-        
-        user_id = warning['user_id']
-        member = ctx.guild.get_member(int(user_id))
-        member_name = member.display_name if member else f"User ID: {user_id}"
-        
-        await ctx.send(f"✅ Cleared warning #{warning_id} for {member_name}.")
-    
-    @commands.hybrid_command(name="kick")
-    @commands.guild_only()
-    @commands.has_permissions(kick_members=True)
-    @app_commands.describe(
-        member="The member to kick",
-        reason="The reason for kicking"
-    )
-    async def kick_user(self, ctx, member: discord.Member, *, reason: str = "No reason provided"):
-        """Kick a member from the server"""
-        if member.top_role.position >= ctx.author.top_role.position and ctx.author != ctx.guild.owner:
-            await ctx.send("You cannot kick a member with a role higher than or equal to yours.")
-            return
-            
-        # Log the kick
-        await db.execute(
-            """
-            INSERT INTO warnings (guild_id, user_id, moderator_id, reason)
-            VALUES ($1, $2, $3, $4 || ' (Kicked)')
-            """,
-            str(ctx.guild.id), str(member.id), str(ctx.author.id), reason
-        )
-        
-        try:
-            # Try to DM the user before kicking
-            embed = discord.Embed(
-                title=f"You've been kicked from {ctx.guild.name}",
-                description=f"**Reason:** {reason}",
-                color=discord.Color.red()
-            )
-            try:
-                await member.send(embed=embed)
-            except:
-                pass  # Can't DM them, continue with kick
-                
-            await member.kick(reason=reason)
-            
-            # Confirmation message
-            confirm_embed = discord.Embed(
-                title="👢 Member Kicked",
-                description=f"{member.mention} has been kicked by {ctx.author.mention}",
-                color=discord.Color.red()
-            )
-            confirm_embed.add_field(name="Reason", value=reason, inline=False)
-            
-            await ctx.send(embed=confirm_embed)
-            
-        except discord.Forbidden:
-            await ctx.send("I don't have permission to kick that member.")
-        except discord.HTTPException as e:
-            await ctx.send(f"Failed to kick member: {e}")
-    
-    @commands.hybrid_command(name="ban")
-    @commands.guild_only()
+        self.warning_thresholds = config.get("moderation", {}).get("warning_thresholds", {
+            "3": "mute",
+            "5": "kick",
+            "7": "ban"
+        })
+        self.auto_punish = config.get("moderation", {}).get("auto_punish", False)
+
+    @commands.command(name="ban")
     @commands.has_permissions(ban_members=True)
-    @app_commands.describe(
-        member="The member to ban",
-        delete_days="Number of days of message history to delete (0-7)",
-        reason="Reason for the ban"
-    )
-    async def ban_user(self, ctx, member: discord.Member, delete_days: Optional[int] = 1, *, reason: str = "No reason provided"):
-        """Permanently ban a member from the server"""
-        if delete_days < 0 or delete_days > 7:
-            await ctx.send("Message deletion days must be between 0 and 7.")
-            return
-            
-        if member.top_role.position >= ctx.author.top_role.position and ctx.author != ctx.guild.owner:
-            await ctx.send("You cannot ban a member with a role higher than or equal to yours.")
-            return
-            
-        # Log the ban
-        await db.execute(
-            """
-            INSERT INTO warnings (guild_id, user_id, moderator_id, reason)
-            VALUES ($1, $2, $3, $4 || ' (Banned)')
-            """,
-            str(ctx.guild.id), str(member.id), str(ctx.author.id), reason
-        )
-        
+    async def ban_user(self, ctx, member: discord.Member, *, reason="No reason provided"):
+        """Ban a user from the server"""
         try:
-            # Try to DM the user before banning
-            embed = discord.Embed(
-                title=f"You've been banned from {ctx.guild.name}",
-                description=f"**Reason:** {reason}",
-                color=discord.Color.dark_red()
-            )
-            try:
-                await member.send(embed=embed)
-            except:
-                pass  # Can't DM them, continue with ban
-                
-            await member.ban(delete_message_days=delete_days, reason=reason)
+            await member.ban(reason=reason)
             
-            # Confirmation message
-            confirm_embed = discord.Embed(
-                title="🔨 Member Banned",
-                description=f"{member.mention} has been banned by {ctx.author.mention}",
-                color=discord.Color.dark_red()
-            )
-            confirm_embed.add_field(name="Reason", value=reason, inline=False)
-            
-            await ctx.send(embed=confirm_embed)
-            
-        except discord.Forbidden:
-            await ctx.send("I don't have permission to ban that member.")
-        except discord.HTTPException as e:
-            await ctx.send(f"Failed to ban member: {e}")
-    
-    @commands.hybrid_command(name="tempmute")
-    @commands.guild_only()
-    @app_commands.describe(
-        member="The member to mute",
-        duration="Duration (e.g. 1h, 30m, 1d)",
-        reason="Reason for the mute"
-    )
-    async def tempmute(self, ctx, member: discord.Member, duration: str, *, reason: str = "No reason provided"):
-        """Temporarily mute a member"""
-        if not await self.has_mod_permissions(ctx):
-            await ctx.send("You don't have permission to use this command.")
-            return
-            
-        if member.top_role.position >= ctx.author.top_role.position and ctx.author != ctx.guild.owner:
-            await ctx.send("You cannot mute a member with a role higher than or equal to yours.")
-            return
-            
-        # Get the mute role
-        settings = await self.get_guild_settings(ctx.guild.id)
-        mute_role_id = settings.get('mute_role_id')
-        
-        if not mute_role_id:
-            await ctx.send("Mute role not configured. Please set one with `/settings mute_role`.")
-            return
-            
-        mute_role = ctx.guild.get_role(int(mute_role_id))
-        if not mute_role:
-            await ctx.send("Mute role not found. It may have been deleted.")
-            return
-        
-        # Parse duration
-        duration_seconds = 0
-        time_units = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
-        
-        try:
-            time_str = ''
-            for char in duration:
-                if char.isdigit() or char == '.':
-                    time_str += char
-                elif char.lower() in time_units:
-                    duration_seconds += float(time_str) * time_units[char.lower()]
-                    time_str = ''
-                else:
-                    raise ValueError
-                    
-            if time_str:  # If there's leftover numbers with no unit, assume seconds
-                duration_seconds += float(time_str)
-                
-            if duration_seconds <= 0:
-                raise ValueError
-                
-        except ValueError:
-            await ctx.send("Invalid duration format. Please use combinations like '30s', '5m', '1h', '1d'.")
-            return
-        
-        # Calculate expiry time
-        expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=duration_seconds)
-        
-        # Format readable duration
-        readable_duration = ""
-        days, remainder = divmod(duration_seconds, 86400)
-        hours, remainder = divmod(remainder, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        
-        if days > 0:
-            readable_duration += f"{int(days)} day{'s' if days != 1 else ''} "
-        if hours > 0:
-            readable_duration += f"{int(hours)} hour{'s' if hours != 1 else ''} "
-        if minutes > 0:
-            readable_duration += f"{int(minutes)} minute{'s' if minutes != 1 else ''} "
-        if seconds > 0 and days == 0 and hours == 0:  # Only show seconds for short durations
-            readable_duration += f"{int(seconds)} second{'s' if seconds != 1 else ''} "
-            
-        readable_duration = readable_duration.strip()
-        
-        try:
-            # Add mute role
-            await member.add_roles(mute_role, reason=f"Muted for {readable_duration}: {reason}")
-            
-            # Store in database
-            await db.execute(
-                """
-                INSERT INTO timed_punishments 
-                (guild_id, user_id, moderator_id, punishment_type, reason, expires_at)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                """,
-                str(ctx.guild.id), str(member.id), str(ctx.author.id), 'mute', reason, expires_at
-            )
-            
-            # Also add a warning
-            await db.execute(
-                """
-                INSERT INTO warnings (guild_id, user_id, moderator_id, reason)
-                VALUES ($1, $2, $3, $4 || ' (Muted for ' || $5 || ')')
-                """,
-                str(ctx.guild.id), str(member.id), str(ctx.author.id), reason, readable_duration
-            )
+            # Log the ban
+            logger.log(f"{ctx.author} banned {member} for: {reason}")
             
             # Send confirmation
             embed = discord.Embed(
-                title="🔇 Member Muted",
-                description=f"{member.mention} has been muted by {ctx.author.mention}",
-                color=discord.Color.orange()
+                title="User Banned",
+                description=f"{member.mention} has been banned",
+                color=discord.Color.red()
             )
-            embed.add_field(name="Duration", value=readable_duration, inline=True)
-            embed.add_field(name="Expires", value=f"<t:{int(expires_at.timestamp())}:R>", inline=True)
-            embed.add_field(name="Reason", value=reason, inline=False)
+            embed.add_field(name="Reason", value=reason)
+            embed.set_footer(text=f"Banned by {ctx.author}")
             
             await ctx.send(embed=embed)
             
             # Try to DM the user
             try:
-                user_embed = discord.Embed(
-                    title=f"You've been muted in {ctx.guild.name}",
-                    description=f"**Duration:** {readable_duration}\n**Expires:** <t:{int(expires_at.timestamp())}:R>\n**Reason:** {reason}",
+                embed = discord.Embed(
+                    title=f"You've been banned from {ctx.guild.name}",
+                    description=f"Reason: {reason}",
+                    color=discord.Color.red()
+                )
+                await member.send(embed=embed)
+            except discord.Forbidden:
+                # Can't DM the user
+                pass
+                
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to ban that user.")
+        except Exception as e:
+            logger.log(f"Error banning user: {str(e)}", "error")
+            await ctx.send(f"An error occurred: {str(e)}")
+
+    @commands.command(name="kick")
+    @commands.has_permissions(kick_members=True)
+    async def kick_user(self, ctx, member: discord.Member, *, reason="No reason provided"):
+        """Kick a user from the server"""
+        try:
+            await member.kick(reason=reason)
+            
+            # Log the kick
+            logger.log(f"{ctx.author} kicked {member} for: {reason}")
+            
+            # Send confirmation
+            embed = discord.Embed(
+                title="User Kicked",
+                description=f"{member.mention} has been kicked",
+                color=discord.Color.orange()
+            )
+            embed.add_field(name="Reason", value=reason)
+            embed.set_footer(text=f"Kicked by {ctx.author}")
+            
+            await ctx.send(embed=embed)
+            
+            # Try to DM the user
+            try:
+                embed = discord.Embed(
+                    title=f"You've been kicked from {ctx.guild.name}",
+                    description=f"Reason: {reason}",
                     color=discord.Color.orange()
                 )
-                await member.send(embed=user_embed)
-            except:
-                pass  # Can't DM them
-                
-        except discord.Forbidden:
-            await ctx.send("I don't have permission to mute that member.")
-        except discord.HTTPException as e:
-            await ctx.send(f"Failed to mute member: {e}")
-    
-    @commands.hybrid_command(name="unmute")
-    @commands.guild_only()
-    @app_commands.describe(
-        member="The member to unmute",
-        reason="Reason for unmuting"
-    )
-    async def unmute(self, ctx, member: discord.Member, *, reason: str = "Mute duration complete"):
-        """Unmute a previously muted member"""
-        if not await self.has_mod_permissions(ctx):
-            await ctx.send("You don't have permission to use this command.")
-            return
-            
-        # Get mute role
-        settings = await self.get_guild_settings(ctx.guild.id)
-        mute_role_id = settings.get('mute_role_id')
-        
-        if not mute_role_id:
-            await ctx.send("Mute role not configured.")
-            return
-            
-        mute_role = ctx.guild.get_role(int(mute_role_id))
-        if not mute_role:
-            await ctx.send("Mute role not found. It may have been deleted.")
-            return
-            
-        if mute_role not in member.roles:
-            await ctx.send(f"{member.display_name} is not muted.")
-            return
-            
-        try:
-            # Remove mute role
-            await member.remove_roles(mute_role, reason=reason)
-            
-            # Update database
-            await db.execute(
-                """
-                UPDATE timed_punishments
-                SET active = FALSE
-                WHERE guild_id = $1 AND user_id = $2 AND punishment_type = 'mute' AND active = TRUE
-                """,
-                str(ctx.guild.id), str(member.id)
-            )
-            
-            # Send confirmation
-            await ctx.send(f"✅ {member.mention} has been unmuted. Reason: {reason}")
-            
-        except discord.Forbidden:
-            await ctx.send("I don't have permission to unmute that member.")
-        except discord.HTTPException as e:
-            await ctx.send(f"Failed to unmute member: {e}")
-            
-    @commands.hybrid_command(name="tempban")
-    @commands.guild_only()
-    @commands.has_permissions(ban_members=True)
-    @app_commands.describe(
-        member="The member to temporarily ban",
-        duration="Duration (e.g. 1h, 30m, 1d)",
-        delete_days="Number of days of message history to delete (0-7)",
-        reason="Reason for the ban"
-    )
-    async def tempban(self, ctx, member: discord.Member, duration: str, 
-                      delete_days: Optional[int] = 1, *, reason: str = "No reason provided"):
-        """Temporarily ban a member from the server"""
-        if delete_days < 0 or delete_days > 7:
-            await ctx.send("Message deletion days must be between 0 and 7.")
-            return
-            
-        if member.top_role.position >= ctx.author.top_role.position and ctx.author != ctx.guild.owner:
-            await ctx.send("You cannot ban a member with a role higher than or equal to yours.")
-            return
-            
-        # Parse duration similarly to tempmute
-        duration_seconds = 0
-        time_units = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
-        
-        try:
-            time_str = ''
-            for char in duration:
-                if char.isdigit() or char == '.':
-                    time_str += char
-                elif char.lower() in time_units:
-                    duration_seconds += float(time_str) * time_units[char.lower()]
-                    time_str = ''
-                else:
-                    raise ValueError
-                    
-            if time_str:  # If there's leftover numbers with no unit, assume seconds
-                duration_seconds += float(time_str)
-                
-            if duration_seconds <= 0:
-                raise ValueError
-                
-        except ValueError:
-            await ctx.send("Invalid duration format. Please use combinations like '30s', '5m', '1h', '1d'.")
-            return
-        
-        # Calculate expiry time
-        expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=duration_seconds)
-        
-        # Format readable duration
-        readable_duration = ""
-        days, remainder = divmod(duration_seconds, 86400)
-        hours, remainder = divmod(remainder, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        
-        if days > 0:
-            readable_duration += f"{int(days)} day{'s' if days != 1 else ''} "
-        if hours > 0:
-            readable_duration += f"{int(hours)} hour{'s' if hours != 1 else ''} "
-        if minutes > 0:
-            readable_duration += f"{int(minutes)} minute{'s' if minutes != 1 else ''} "
-        if seconds > 0 and days == 0 and hours == 0:
-            readable_duration += f"{int(seconds)} second{'s' if seconds != 1 else ''} "
-            
-        readable_duration = readable_duration.strip()
-        
-        try:
-            # Try to DM the user before banning
-            embed = discord.Embed(
-                title=f"You've been temporarily banned from {ctx.guild.name}",
-                description=f"**Duration:** {readable_duration}\n**Expires:** <t:{int(expires_at.timestamp())}:R>\n**Reason:** {reason}",
-                color=discord.Color.dark_red()
-            )
-            try:
                 await member.send(embed=embed)
-            except:
-                pass  # Can't DM them, continue with ban
+            except discord.Forbidden:
+                # Can't DM the user
+                pass
                 
-            # Ban the member
-            await member.ban(delete_message_days=delete_days, reason=f"Temp ban for {readable_duration}: {reason}")
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to kick that user.")
+        except Exception as e:
+            logger.log(f"Error kicking user: {str(e)}", "error")
+            await ctx.send(f"An error occurred: {str(e)}")
+
+    @commands.command(name="warn")
+    @commands.has_permissions(manage_messages=True)
+    async def warn_user(self, ctx, member: discord.Member, *, reason=None):
+        """Warn a user"""
+        if reason is None:
+            reason = self.default_warning_reason
             
-            # Store in database
+        user_id = str(member.id)
+        
+        try:
+            # Get current warning count
+            current_warnings = await db.fetchval(
+                "SELECT warnings FROM pickle_counts WHERE user_id = $1",
+                user_id
+            ) or 0
+            
+            # Increment warnings
+            new_warnings = current_warnings + 1
+            
+            # Update in database
             await db.execute(
                 """
-                INSERT INTO timed_punishments 
-                (guild_id, user_id, moderator_id, punishment_type, reason, expires_at)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO pickle_counts(user_id, warnings)
+                VALUES($1, $2)
+                ON CONFLICT (user_id)
+                DO UPDATE SET warnings = $2
                 """,
-                str(ctx.guild.id), str(member.id), str(ctx.author.id), 'ban', reason, expires_at
+                user_id, new_warnings
             )
             
-            # Also add a warning
-            await db.execute(
-                """
-                INSERT INTO warnings (guild_id, user_id, moderator_id, reason)
-                VALUES ($1, $2, $3, $4 || ' (Banned for ' || $5 || ')')
-                """,
-                str(ctx.guild.id), str(member.id), str(ctx.author.id), reason, readable_duration
-            )
+            # Log the warning
+            logger.log(f"{ctx.author} warned {member} (Warning #{new_warnings}): {reason}")
             
             # Send confirmation
-            confirm_embed = discord.Embed(
-                title="⏱️ Temporary Ban",
-                description=f"{member.mention} has been banned by {ctx.author.mention}",
-                color=discord.Color.dark_red()
+            embed = discord.Embed(
+                title="User Warned",
+                description=f"{member.mention} has been warned",
+                color=discord.Color.gold()
             )
-            confirm_embed.add_field(name="Duration", value=readable_duration, inline=True)
-            confirm_embed.add_field(name="Expires", value=f"<t:{int(expires_at.timestamp())}:R>", inline=True)
-            confirm_embed.add_field(name="Reason", value=reason, inline=False)
+            embed.add_field(name="Reason", value=reason, inline=False)
+            embed.add_field(name="Warning Count", value=str(new_warnings), inline=False)
+            embed.set_footer(text=f"Warned by {ctx.author}")
             
-            await ctx.send(embed=confirm_embed)
+            await ctx.send(embed=embed)
             
-        except discord.Forbidden:
-            await ctx.send("I don't have permission to ban that member.")
-        except discord.HTTPException as e:
-            await ctx.send(f"Failed to ban member: {e}")
+            # Try to DM the user
+            try:
+                embed = discord.Embed(
+                    title=f"You've been warned in {ctx.guild.name}",
+                    description=f"Reason: {reason}",
+                    color=discord.Color.gold()
+                )
+                embed.add_field(name="Warning Count", value=str(new_warnings), inline=False)
+                await member.send(embed=embed)
+            except discord.Forbidden:
+                # Can't DM the user
+                pass
+                
+            # Check for auto-punishments if enabled
+            if self.auto_punish:
+                await self.check_auto_punish(ctx, member, new_warnings)
+                
+        except Exception as e:
+            logger.log(f"Error warning user: {str(e)}", "error")
+            await ctx.send(f"An error occurred: {str(e)}")
 
-    @commands.hybrid_command(name="unban")
-    @commands.guild_only()
-    @commands.has_permissions(ban_members=True)
-    @app_commands.describe(
-        user_id="The ID of the user to unban",
-        reason="Reason for the unban"
-    )
-    async def unban_user(self, ctx, user_id: str, *, reason: str = "Ban appeal approved"):
-        """Unban a user by their ID"""
+    async def check_auto_punish(self, ctx, member, warning_count):
+        """Check if auto-punishment should be applied based on warning count"""
+        warning_count_str = str(warning_count)
+        
+        # Check if this warning count triggers a punishment
+        for threshold, action in self.warning_thresholds.items():
+            if warning_count_str == threshold:
+                if action == "mute":
+                    # Example implementation - this requires a mute role to be set up
+                    try:
+                        mute_role = discord.utils.get(ctx.guild.roles, name="Muted")
+                        if mute_role:
+                            await member.add_roles(mute_role)
+                            await ctx.send(f"{member.mention} has been automatically muted for reaching {warning_count} warnings.")
+                    except Exception as e:
+                        logger.log(f"Failed to auto-mute: {str(e)}", "error")
+                
+                elif action == "kick":
+                    try:
+                        await member.kick(reason=f"Automatic kick: Reached {warning_count} warnings")
+                        await ctx.send(f"{member.mention} has been automatically kicked for reaching {warning_count} warnings.")
+                    except Exception as e:
+                        logger.log(f"Failed to auto-kick: {str(e)}", "error")
+                
+                elif action == "ban":
+                    try:
+                        await member.ban(reason=f"Automatic ban: Reached {warning_count} warnings")
+                        await ctx.send(f"{member.mention} has been automatically banned for reaching {warning_count} warnings.")
+                    except Exception as e:
+                        logger.log(f"Failed to auto-ban: {str(e)}", "error")
+
+    @commands.command(name="warnings")
+    async def get_warnings(self, ctx, member: discord.Member = None):
+        """Check warnings for a user"""
+        target = member or ctx.author
+        user_id = str(target.id)
+        
         try:
-            user_id = int(user_id)
-        except ValueError:
-            await ctx.send("Invalid user ID. Please provide a valid numeric ID.")
-            return
+            # Get warning count
+            warnings = await db.fetchval(
+                "SELECT warnings FROM pickle_counts WHERE user_id = $1",
+                user_id
+            ) or 0
             
+            # Send response
+            if warnings == 0:
+                await ctx.send(f"{target.mention} has no warnings! 🎉")
+            else:
+                await ctx.send(f"{target.mention} has {warnings} warning(s).")
+                
+        except Exception as e:
+            logger.log(f"Error retrieving warnings: {str(e)}", "error")
+            await ctx.send("I couldn't retrieve warning information at this time.")
+
+    @commands.command(name="clearwarnings")
+    @commands.has_permissions(manage_messages=True)
+    async def clear_warnings(self, ctx, member: discord.Member):
+        """Clear all warnings for a user"""
+        user_id = str(member.id)
+        
         try:
-            # Fetch ban entry
-            bans = [ban_entry for ban_entry in await ctx.guild.bans()]
-            user = discord.Object(id=user_id)
-            
-            # Unban user
-            await ctx.guild.unban(user, reason=reason)
-            
             # Update database
             await db.execute(
                 """
-                UPDATE timed_punishments
-                SET active = FALSE
-                WHERE guild_id = $1 AND user_id = $2 AND punishment_type = 'ban' AND active = TRUE
+                UPDATE pickle_counts
+                SET warnings = 0
+                WHERE user_id = $1
                 """,
-                str(ctx.guild.id), str(user_id)
+                user_id
             )
             
-            # Send confirmation
-            await ctx.send(f"✅ User with ID `{user_id}` has been unbanned. Reason: {reason}")
+            # Log action
+            logger.log(f"{ctx.author} cleared all warnings for {member}")
             
-        except discord.NotFound:
-            await ctx.send("This user is not banned or the ID is invalid.")
+            # Send confirmation
+            await ctx.send(f"All warnings for {member.mention} have been cleared.")
+                
+        except Exception as e:
+            logger.log(f"Error clearing warnings: {str(e)}", "error")
+            await ctx.send("I couldn't clear the warnings at this time.")
+
+    @commands.command(name="mute")
+    @commands.has_permissions(manage_roles=True)
+    async def mute_user(self, ctx, member: discord.Member, duration: int = 10, *, reason="No reason provided"):
+        """Mute a user for a specified number of minutes"""
+        try:
+            # Check for Muted role
+            muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
+            if not muted_role:
+                # Create role if it doesn't exist
+                muted_role = await ctx.guild.create_role(name="Muted", reason="Mute command used but no Muted role existed")
+                
+                # Set permissions for the role
+                for channel in ctx.guild.channels:
+                    try:
+                        await channel.set_permissions(muted_role, send_messages=False, speak=False)
+                    except:
+                        pass
+            
+            # Add role to user
+            await member.add_roles(muted_role, reason=reason)
+            
+            # Log the mute
+            logger.log(f"{ctx.author} muted {member} for {duration} minutes: {reason}")
+            
+            # Send confirmation
+            embed = discord.Embed(
+                title="User Muted",
+                description=f"{member.mention} has been muted for {duration} minutes",
+                color=discord.Color.dark_orange()
+            )
+            embed.add_field(name="Reason", value=reason)
+            embed.set_footer(text=f"Muted by {ctx.author}")
+            
+            await ctx.send(embed=embed)
+            
+            # Schedule unmute
+            if duration > 0:
+                # Import needed here to avoid circular imports
+                import asyncio
+                await asyncio.sleep(duration * 60)
+                # Check if still muted
+                if muted_role in member.roles:
+                    await member.remove_roles(muted_role, reason="Mute duration expired")
+                    await ctx.send(f"{member.mention} has been unmuted (mute duration expired).")
+                
         except discord.Forbidden:
-            await ctx.send("I don't have permission to unban members.")
-        except discord.HTTPException as e:
-            await ctx.send(f"Failed to unban user: {e}")
+            await ctx.send("I don't have permission to manage roles.")
+        except Exception as e:
+            logger.log(f"Error muting user: {str(e)}", "error")
+            await ctx.send(f"An error occurred: {str(e)}")
+
+    @commands.command(name="unmute")
+    @commands.has_permissions(manage_roles=True)
+    async def unmute_user(self, ctx, member: discord.Member, *, reason="Mute duration expired"):
+        """Unmute a user"""
+        try:
+            # Check for Muted role
+            muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
+            if not muted_role:
+                await ctx.send("There is no Muted role set up!")
+                return
+                
+            # Check if user is muted
+            if muted_role not in member.roles:
+                await ctx.send(f"{member.mention} is not currently muted!")
+                return
+                
+            # Remove muted role
+            await member.remove_roles(muted_role, reason=reason)
+            
+            # Log the unmute
+            logger.log(f"{ctx.author} unmuted {member}: {reason}")
+            
+            # Send confirmation
+            await ctx.send(f"{member.mention} has been unmuted.")
+                
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to manage roles.")
+        except Exception as e:
+            logger.log(f"Error unmuting user: {str(e)}", "error")
+            await ctx.send(f"An error occurred: {str(e)}")
 
 async def setup(bot):
     await bot.add_cog(Moderation(bot))

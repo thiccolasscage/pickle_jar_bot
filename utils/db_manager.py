@@ -12,7 +12,26 @@ class DatabaseManager:
         self.max_retries = 3
         self.retry_delay = 5  # seconds
     
-    async def connect(self, required=False):
+    # Add these to utils/db_manager.py
+async def connect(self, required=True):
+    try:
+        self.pool = await asyncpg.create_pool(self.db_url)
+        return True
+    except Exception as e:
+        if required:
+            raise e
+        return False
+
+async def create_tables_from_schema(self, schema_path):
+    try:
+        with open(schema_path, 'r') as f:
+            schema_sql = f.read()
+        async with self.pool.acquire() as conn:
+            await conn.execute(schema_sql)
+        return True
+    except Exception as e:
+        print(f"Error creating tables: {e}")
+        return False
         if not self.db_url:
             logger.log("WARNING: DATABASE_URL not set. Database functionality will be limited.")
             return False
