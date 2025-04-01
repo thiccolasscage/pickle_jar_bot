@@ -1,21 +1,6 @@
-﻿# Environment variables and secrets
+﻿# Add a .gitignore file if you don't have one
 .env
-*.env
-
-# Logs
 logs/
-*.log
-
-# Python cache files
 __pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual environment
-venv/
-env/
-ENV/
-
-# IDE files
-.idea/
+*.pyc
 .vscode/

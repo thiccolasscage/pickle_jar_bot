@@ -1,137 +1,122 @@
 import asyncpg
 import os
-import asyncio
-import logging
 from utils.logger import logger
 
 class DatabaseManager:
     def __init__(self):
         self.db_url = os.getenv("DATABASE_URL")
         self.pool = None
-        self.connected = False
-        self.max_retries = 3
-        self.retry_delay = 5  # seconds
-    
-    # Add these to utils/db_manager.py
-async def connect(self, required=True):
-    try:
-        self.pool = await asyncpg.create_pool(self.db_url)
-        return True
-    except Exception as e:
-        if required:
-            raise e
-        return False
 
-async def create_tables_from_schema(self, schema_path):
-    try:
-        with open(schema_path, 'r') as f:
-            schema_sql = f.read()
-        async with self.pool.acquire() as conn:
-            await conn.execute(schema_sql)
-        return True
-    except Exception as e:
-        print(f"Error creating tables: {e}")
-        return False
-        if not self.db_url:
-            logger.log("WARNING: DATABASE_URL not set. Database functionality will be limited.")
+    async def connect(self, required=True):
+        """
+        Connects to the PostgreSQL database.
+        
+        Args:
+            required (bool): If True, raises an exception when connection fails.
+                            If False, returns False on failure instead of raising.
+        
+        Returns:
+            bool: True if connection was successful, False otherwise.
+        """
+        try:
+            if not self.db_url:
+                raise ValueError("DATABASE_URL environment variable is not set")
+                
+            self.pool = await asyncpg.create_pool(self.db_url)
+            logger.log(f"Successfully connected to database")
+            return True
+        except Exception as e:
+            logger.log(f"Database connection error: {str(e)}", "error")
+            if required:
+                raise e
             return False
 
-        retry_count = 0
-        while retry_count < self.max_retries:
-            try:
-                logger.log(f"Attempting to connect to database (attempt {retry_count + 1}/{self.max_retries})...")
-                self.pool = await asyncpg.create_pool(self.db_url)
-                self.connected = True
-                logger.log("Successfully connected to database!")
-                return True
-            except (asyncpg.PostgresError, OSError) as e:
-                retry_count += 1
-                if retry_count < self.max_retries:
-                    logger.log(f"Database connection error: {str(e)}. Retrying in {self.retry_delay} seconds...", "error")
-                    await asyncio.sleep(self.retry_delay)
-                else:
-                    if required:
-                        logger.log(f"Failed to connect to database after {self.max_retries} attempts: {str(e)}", "error")
-                        raise
-                    else:
-                        logger.log(f"Failed to connect to database after {self.max_retries} attempts: {str(e)}. Running in limited mode.", "error")
-                        return False
-    
+    async def create_tables_from_schema(self, schema_path):
+        """
+        Creates database tables from a SQL schema file.
+        
+        Args:
+            schema_path (str): Path to the SQL schema file.
+            
+        Returns:
+            bool: True if tables were created successfully, False otherwise.
+        """
+        try:
+            if not self.pool:
+                logger.log("Cannot create tables: Not connected to database", "error")
+                return False
+                
+            with open(schema_path, 'r') as f:
+                schema_sql = f.read()
+                
+            async with self.pool.acquire() as conn:
+                await conn.execute(schema_sql)
+                
+            logger.log(f"Successfully created tables from schema: {schema_path}")
+            return True
+        except FileNotFoundError:
+            logger.log(f"Schema file not found: {schema_path}", "error")
+            return False
+        except Exception as e:
+            logger.log(f"Error creating tables from schema: {str(e)}", "error")
+            return False
+
     async def execute(self, query, *args):
-        """Execute a SQL query that doesn't return data"""
-        if not self.connected:
-            logger.log("Database not connected. Cannot execute query.", "error")
+        """Execute a query with no return value expected."""
+        if not self.pool:
+            logger.log("Cannot execute query: Not connected to database", "error")
             return None
             
         try:
             async with self.pool.acquire() as conn:
                 return await conn.execute(query, *args)
         except Exception as e:
-            logger.log(f"Database query error in execute(): {str(e)}", "error")
+            logger.log(f"Database execute error: {str(e)}", "error")
             raise
-    
+
+    async def fetchval(self, query, *args):
+        """Execute a query and return a single value."""
+        if not self.pool:
+            logger.log("Cannot fetch value: Not connected to database", "error")
+            return None
+            
+        try:
+            async with self.pool.acquire() as conn:
+                return await conn.fetchval(query, *args)
+        except Exception as e:
+            logger.log(f"Database fetchval error: {str(e)}", "error")
+            return None
+
     async def fetch(self, query, *args):
-        """Execute a SQL query that returns multiple rows"""
-        if not self.connected:
-            logger.log("Database not connected. Cannot execute query.", "error")
+        """Execute a query and return all results as a list of records."""
+        if not self.pool:
+            logger.log("Cannot fetch records: Not connected to database", "error")
             return []
             
         try:
             async with self.pool.acquire() as conn:
                 return await conn.fetch(query, *args)
         except Exception as e:
-            logger.log(f"Database query error in fetch(): {str(e)}", "error")
-            raise
-    
+            logger.log(f"Database fetch error: {str(e)}", "error")
+            return []
+
     async def fetchrow(self, query, *args):
-        """Execute a SQL query that returns a single row"""
-        if not self.connected:
-            logger.log("Database not connected. Cannot execute query.", "error")
+        """Execute a query and return the first row."""
+        if not self.pool:
+            logger.log("Cannot fetch row: Not connected to database", "error")
             return None
             
         try:
             async with self.pool.acquire() as conn:
                 return await conn.fetchrow(query, *args)
         except Exception as e:
-            logger.log(f"Database query error in fetchrow(): {str(e)}", "error")
-            raise
-    
-    async def create_tables_from_schema(self, schema_file="schema.sql"):
-        """Create database tables from schema file"""
-        if not self.connected:
-            logger.log("Database not connected. Cannot create tables.", "error")
-            return False
-            
-        try:
-            # Read schema file
-            with open(schema_file, "r") as f:
-                schema = f.read()
-                
-            # Split schema by semicolons to execute multiple statements
-            statements = schema.split(';')
-            
-            # Execute each statement
-            async with self.pool.acquire() as conn:
-                for statement in statements:
-                    statement = statement.strip()
-                    if statement:  # Skip empty statements
-                        await conn.execute(statement)
-                        
-            logger.log("Successfully created database tables!")
-            return True
-        except FileNotFoundError:
-            logger.log(f"Schema file '{schema_file}' not found.", "error")
-            return False
-        except Exception as e:
-            logger.log(f"Error creating database tables: {str(e)}", "error")
-            return False
-    
+            logger.log(f"Database fetchrow error: {str(e)}", "error")
+            return None
+
     async def close(self):
-        """Close the database connection pool"""
+        """Close the database connection pool."""
         if self.pool:
             await self.pool.close()
-            self.connected = False
-            logger.log("Database connection closed.")
+            logger.log("Database connection closed")
 
-# Create a singleton instance
 db = DatabaseManager()

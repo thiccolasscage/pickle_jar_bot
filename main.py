@@ -1,4 +1,10 @@
+# At the very top of main.py
+import sys
 import os
+# Add the current directory to the path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Then your regular imports
 import asyncio
 import discord
 from discord.ext import commands
